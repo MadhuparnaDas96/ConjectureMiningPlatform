@@ -1,21 +1,14 @@
-# === Python dependencies ===
-
-
- langchain
- wikipidea
+langchain
+ wikipedia
  langchain-community
  langchain-openai
  python-dotenv
  pydantic
  duckduckgo-search
 
-
- # === Lean dependencies ===
+# === Lean dependencies ===
 # Ensure Lean 4 and Lake are installed on the host environment. Then clone and build mathlib4:
-sh: |
-  git clone https://github.com/leanprover-community/mathlib4.git libs/mathlib4
-  cd libs/mathlib4
-  lake build
-
-# After this, your AI agent can import Lean modules by invoking the Lean process, e.g.:
-# lean --run your_agent.lean
+# sh: |
+#  git clone https://github.com/leanprover-community/mathlib4.git libs/mathlib4
+#  cd libs/mathlib4
+#  lake build

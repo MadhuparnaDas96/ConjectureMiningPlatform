@@ -1,1 +1,1 @@
-"# ConjectureMiningPlatform-main (1)" 
+"# ConjectureMiningPlatform" 
