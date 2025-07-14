@@ -5,9 +5,7 @@ import Mathlib.Data.Rat.Basic
 import Mathlib.Algebra.Group.Basic
 import Mathlib.Algebra.Ring.Basic
 
-
-
 open Nat
 open Rat
 
-#print twin primes
+#print probabilistic number theory

@@ -6,6 +6,10 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from tools import search_tool
 from tools import definition_tool
+from tools import find_mathlib_knn_tool
+from tools import danalyze_csv_tool
+from tools import rank_tool
+from tools import fetch_definition_from_mathlib
 from tools import (
     PatternDiscovery,
     MLIntegration,
@@ -17,7 +21,8 @@ import subprocess
 
 import argparse
 import logging
-
+import networkx as nx 
+import random
 
 ###from langchain_gemini import ChatGemini
 
@@ -31,7 +36,7 @@ class ConjecturegenerationResponse(BaseModel):
     explanation: str  
     tools_used : list[str]          # Source of the conjecture (e.g., "mathlib", "user input")
 
-llm = ChatOpenAI(model="gpt-4.1-mini")
+llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.5)
 
 ###llm2 = ChatGemini(model="gemini-1.5-pro", api_key="your_gemini_api_key")
 
@@ -46,6 +51,10 @@ prompt = ChatPromptTemplate.from_messages(
             Avoid restating known theorems.
             Output a plausible, original conjecture in the style of mathematical research. Please include mathematical equations.
             Clearly explain the reasoning behind the conjecture.
+            Use `find_related_mathlib` to fetch Mathlib definitions via Lean and identify k-nearest theorems.
+            If CSV data is detected, call `analyze_csv_dataset`.
+            Use `discover_motifs` to mine symbolic patterns and `rank_motifs` to evaluate them.
+            Then synthesise an original and plausible mathematical conjecture or hypothesis based on all results.
             Warp this output in this formal and provide no other text\n{format_instructions}
             """,
         ),
@@ -55,7 +64,8 @@ prompt = ChatPromptTemplate.from_messages(
     ]
 ).partial(format_instructions=parser.get_format_instructions())
 
-tools = [search_tool, definition_tool]
+
+tools = [search_tool, definition_tool, danalyze_csv_tool, rank_tool, find_mathlib_knn_tool]
 agent = create_tool_calling_agent(
     llm=llm,
     prompt=prompt,
@@ -130,12 +140,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-motifs = pd.mine_motifs(min_support=2)
-logger.info(f"Mined motifs: {motifs}")
-
-# Use Lean to formally filter motifs
-lean_checked_motifs = filter_motifs_with_lean([m[0] for m in motifs], lean_server)
-logger.info("Lean-verified motifs:")
-for motif, msg in lean_checked_motifs:
-    logger.info(f"  {motif}  =>  {msg}")
 

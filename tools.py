@@ -3,6 +3,7 @@ from langchain_community.utilities import WikipediaAPIWrapper
 from langchain.tools import Tool
 from datetime import datetime
 import subprocess
+import json
 import mathlib 
 import os
 from lean_interact import LeanREPLConfig, LeanServer, Command, FileCommand, ProofStep
@@ -12,7 +13,9 @@ from collections import Counter
 import re
 from sentence_transformers import SentenceTransformer, util
 import numpy as np
+import pandas as pd
 from sympy.parsing.latex import parse_latex
+from difflib import get_close_matches
 
 search = DuckDuckGoSearchRun()
 search_tool =Tool(
@@ -33,8 +36,6 @@ import Mathlib.Data.Nat.Basic
 import Mathlib.Data.Rat.Basic
 import Mathlib.Algebra.Group.Basic
 import Mathlib.Algebra.Ring.Basic
-
-
 
 open Nat
 open Rat
@@ -96,6 +97,27 @@ class PatternDiscovery:
     
 
 
+###pattern discovery tool
+
+def discover_motifs(patterns: List[str]) -> List[Tuple[str,int]]:
+    raw = patterns or []
+    parsed = []
+    for p in raw:
+        try:
+            parsed.append(parse_latex(p))
+        except:
+            continue
+    counter = Counter()
+    for expr in parsed:
+        for sub in sp.preorder_traversal(expr):
+            counter[str(sub)] += 1
+    return [(m,c) for m,c in counter.items() if c>=2]
+
+motif_tool = Tool.from_function(
+    discover_motifs,
+    name="discover_motifs",
+    description="Extract frequent symbolic motifs from a list of LaTeX expressions."
+)
 
 
 
@@ -134,6 +156,36 @@ class MLIntegration:
         sorted_idxs = np.argsort(-scores.cpu().numpy())
         return [(candidates[i], float(scores[i])) for i in sorted_idxs]
     
+###ML integration tool
+def rank_motifs(query: str, motifs: List[str]) -> List[Tuple[str,float]]:
+    model = SentenceTransformer('all-mpnet-base-v2')
+    q_emb = model.encode(query, convert_to_tensor=True)
+    c_embs = model.encode(motifs, convert_to_tensor=True)
+    sims = util.pytorch_cos_sim(q_emb, c_embs)[0]
+    idxs = np.argsort(-sims.cpu().numpy())
+    return [(motifs[i], float(sims[i])) for i in idxs]
+
+def rank_motifs_tool(input_str: str) -> list:
+    try:
+        input_json = json.loads(input_str)
+    except Exception:
+        return ["Error: input is not valid JSON"]
+
+    query = input_json.get("query", "")
+    motifs = input_json.get("motifs", [])
+    if not query or not motifs:
+        return []
+
+    return rank_motifs(query, motifs)
+
+rank_tool = Tool.from_function(
+    rank_motifs_tool,
+    name="rank_motifs",
+    description="Rank symbolic motifs by similarity to a query. Input a JSON dict with 'query' string and 'motifs' list of strings."
+)
+
+
+    
 
 #Lean helpers
 
@@ -144,6 +196,8 @@ def init_lean_server(verbose: bool = False, lean_version: str = None) -> LeanSer
     config = LeanREPLConfig(verbose=verbose, lean_version=lean_version)
     server = LeanServer(config)
     return server
+
+lean_server = init_lean_server()
 
 def check_command(server: LeanServer, cmd: str) -> List[str]:
     """
@@ -160,18 +214,71 @@ def load_file(server: LeanServer, path: str) -> List[str]:
     return resp.messages    
 
 
-def filter_motifs_with_lean(motifs: List[str], lean_server: LeanServer) -> List[Tuple[str, str]]:
+
+def analyze_csv_dataset(csv_text: str) -> str:
     """
-    For each motif (string), check if Lean can type-check or simplify it.
-    Returns a list of (motif, Lean message) pairs that passed.
+    Parses CSV input, performs symbolic pattern discovery on summary statistics,
+    and returns a set of conjecture templates or patterns.
     """
-    valid = []
-    for motif in motifs:
-        try:
-            cmd = f"#check {motif}"
-            resp = lean_server.run(Command(cmd=cmd))
-            if resp.messages:
-                valid.append((motif, resp.messages[0]))  # keep 1st message (usually the type)
-        except Exception as e:
-            continue  # skip motifs that Lean rejects outright
-    return valid
+    # Write CSV to temp file
+    tmp = "input_data.csv"
+    with open(tmp, "w") as f:
+        f.write(csv_text)
+    df = pd.read_csv(tmp)
+    # Simple analysis: compute correlations and frequent values
+    corr = df.corr().abs()
+    # find top correlated pairs
+    idx = np.triu_indices_from(corr, k=1)
+    pairs = sorted(
+        [((df.columns[i], df.columns[j]), corr.values[i, j]) for i, j in zip(*idx)],
+        key=lambda x: -x[1]
+    )[:5]
+    patterns = []
+    for (a, b), score in pairs:
+        patterns.append(f"Correlation({a},{b})={score:.3f}")
+    return "\n".join(patterns)
+
+###CSV analysis tool
+danalyze_csv_tool = Tool.from_function(
+    analyze_csv_dataset,
+    name="analyze_csv_dataset",
+    description="Analyze a CSV dataset provided as text and extract patterns for conjecture generation."
+)
+
+# Fill this list with common Mathlib declarations available in your Lake environment
+MATHLIB_NAMES = [
+    "Nat.add_comm", "Nat.mul_comm", "List.map_nil", "Monoid.mul_one",
+    # ... populate as needed or load dynamically via lean server
+]
+
+def _find_related_mathlib(term: str, lean_server: LeanServer, k: int = 3) -> List[Tuple[str, str]]:
+    """
+    Find up to k nearest declarations in Mathlib by name similarity,
+    then fetch their definitions via Lean.
+    Returns list of (declaration, definition_text).
+    """
+    matches = get_close_matches(term, MATHLIB_NAMES, n=k, cutoff=0.5)
+    results = []
+    for name in matches:
+        defn = fetch_definition_from_mathlib(name)
+        results.append((name, defn))
+    return results
+
+def find_related_mathlib_tool(term: str) -> List[Tuple[str, str]]:
+    # Uses the global lean_server
+    return _find_related_mathlib(term, lean_server, k=3)
+
+###K-NN as a tool
+
+find_mathlib_knn_tool = Tool.from_function(
+    _find_related_mathlib,
+    name="find_related_mathlib",
+    description="Find k-nearest Mathlib declarations by name and fetch their definitions via Lean."
+)
+
+lean_server = init_lean_server()
+
+
+
+
+
