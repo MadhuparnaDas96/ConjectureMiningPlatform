@@ -65,7 +65,7 @@ prompt = ChatPromptTemplate.from_messages(
 ).partial(format_instructions=parser.get_format_instructions())
 
 
-tools = [search_tool, definition_tool, danalyze_csv_tool, rank_tool, find_mathlib_knn_tool]
+tools = [search_tool, definition_tool, danalyze_csv_tool, rank_tool]
 agent = create_tool_calling_agent(
     llm=llm,
     prompt=prompt,
@@ -140,4 +140,5 @@ def main():
 if __name__ == "__main__":
     main()
 
-
+if __name__ == "__main__":
+    print(find_related_mathlib("Nat.add_comm"))

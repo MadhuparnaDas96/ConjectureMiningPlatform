@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 from sympy.parsing.latex import parse_latex
 from difflib import get_close_matches
+from functools import partial
 
 search = DuckDuckGoSearchRun()
 search_tool =Tool(
@@ -251,29 +252,30 @@ MATHLIB_NAMES = [
     # ... populate as needed or load dynamically via lean server
 ]
 
-def _find_related_mathlib(term: str, lean_server: LeanServer, k: int = 3) -> List[Tuple[str, str]]:
+def _find_related_mathlib(
+    term: str,
+    lean_server: LeanServer,
+    k: int = 3
+) -> List[Tuple[str, str]]:
     """
     Find up to k nearest declarations in Mathlib by name similarity,
-    then fetch their definitions via Lean.
-    Returns list of (declaration, definition_text).
+    then fetch their definitions.
     """
     matches = get_close_matches(term, MATHLIB_NAMES, n=k, cutoff=0.5)
-    results = []
+    print(f"[debug] matches for {term!r} → {matches}", flush=True)
+
+    results: List[Tuple[str, str]] = []
     for name in matches:
-        defn = fetch_definition_from_mathlib(name)
-        results.append((name, defn))
+        definition = fetch_definition_from_mathlib(name)
+        results.append((name, definition))
     return results
 
-def find_related_mathlib_tool(term: str) -> List[Tuple[str, str]]:
-    # Uses the global lean_server
-    return _find_related_mathlib(term, lean_server, k=3)
-
-###K-NN as a tool
+find_related_mathlib = partial(_find_related_mathlib, lean_server=lean_server, k=3)
 
 find_mathlib_knn_tool = Tool.from_function(
-    _find_related_mathlib,
+    find_related_mathlib,
     name="find_related_mathlib",
-    description="Find k-nearest Mathlib declarations by name and fetch their definitions via Lean."
+    description="Given a term, find the 3 closest Mathlib names and return their definitions."
 )
 
 lean_server = init_lean_server()
