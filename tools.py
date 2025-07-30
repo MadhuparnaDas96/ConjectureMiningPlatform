@@ -17,6 +17,7 @@ import pandas as pd
 from sympy.parsing.latex import parse_latex
 from difflib import get_close_matches
 from functools import partial
+import arxiv
 
 search = DuckDuckGoSearchRun()
 search_tool =Tool(
@@ -25,36 +26,90 @@ search_tool =Tool(
     description = "search the web for relevant information"
 )
 
-def fetch_definition_from_mathlib(term: str) -> str:
-    """
-    Fetches the Lean definition of `term` from Mathlib via `#print`.
-    This simple callback writes a Lean script, builds the Lake project,
-    and returns the raw Lean output.
-    """
-    lean_code = f"""
-import Mathlib.Data.Nat.Prime
-import Mathlib.Data.Nat.Basic
-import Mathlib.Data.Rat.Basic
-import Mathlib.Algebra.Group.Basic
-import Mathlib.Algebra.Ring.Basic
+def arxiv_search(query: str, max_results: int = 3):
+    client = arxiv.Client()
+    search = arxiv.Search(
+        query=query,
+        max_results=max_results,
+        sort_by=arxiv.SortCriterion.Relevance
+    )
+    results = client.results(search)
+    papers = []
+    for paper in results:
+        papers.append({
+            "title": paper.title,
+            "summary": paper.summary,
+            "authors": [author.name for author in paper.authors],
+            "published": paper.published.strftime("%Y-%m-%d"),
+            "pdf_url": paper.pdf_url,
+            "entry_id": paper.entry_id
+        })
+    return papers
 
-open Nat
-open Rat
+def arxiv_search_tool_func(query: str) -> str:
+    papers = arxiv_search(query)
+    if not papers:
+        return "No papers found on arXiv."
+    lines = []
+    for p in papers:
+        lines.append(f"{p['title']} by {', '.join(p['authors'])}, published {p['published']}")
+    return "\n".join(lines)
+
+arxiv_search_tool = Tool.from_function(
+    arxiv_search_tool_func,
+    name="arxiv_search",
+    description="Search arXiv for academic papers related to a given query."
+)
+
+
+
+def fetch_definition_from_mathlib(term: str) -> str:
+    cmd = f"#print {term}"
+    response = lean_server.run(Command(cmd=cmd))
+    # Extract text messages from response
+    outputs = [msg.message for msg in response.messages if hasattr(msg, "message")]
+    return "\n".join(outputs)
+
+#def fetch_definition_from_mathlib(term: str) -> str:
+ #   """
+  #  Fetches the Lean definition of `term` from Mathlib via `#print`.
+   # This simple callback writes a Lean script, builds the Lake project,
+    #and returns the raw Lean output.
+    #"""
+    #lean_code = f"""
+#import Mathlib.Data.Nat.Prime
+#import Mathlib.Data.Nat.Basic
+#import Mathlib.Data.Rat.Basic
+#import Mathlib.Algebra.Group.Basic
+#import Mathlib.Algebra.Ring.Basic
+#import Mathlib.NumberTheory.Prime
+#import Mathlib.Number Theory.Betrand
+
+#open Nat
+#open Rat
 
 #print {term}
-"""
-    script_path = "query_definition.lean"
-    with open(script_path, "w") as f:
-        f.write(lean_code)
+#"""
+ #   script_path = "query_definition.lean"
+  #  with open(script_path, "w") as f:
+   #     f.write(lean_code)
 
+    #result = lean_server.run(Command(cmd=lean_code))
+    # Use .data or .message instead of .text
+    #output_lines = [msg.data for msg in result.messages if hasattr(msg, 'data') and msg.data]
+    # fallback if .data doesn't exist
+    #if not output_lines:
+     #   output_lines = [msg.message for msg in result.messages if hasattr(msg, 'message') and msg.message]
+    #return "\n".join(output_lines)
+    
+    #result = subprocess.run(
+    #    ["lake", "exec", "lean", "--run", script_path],
+     #   capture_output=True,
+      #  text=True,
+       # timeout=3600
+    #)
 
-    result = subprocess.run(
-        ["lake", "exec", "lean", "--run", script_path],
-        capture_output=True,
-        text=True,
-        timeout=3600
-    )
-    return result.stdout.strip() if result.stdout else result.stderr.strip()
+    #return result.stdout.strip() if result.stdout else result.stderr.strip()
 
 definition_tool = Tool.from_function(
     fetch_definition_from_mathlib,
@@ -247,10 +302,25 @@ danalyze_csv_tool = Tool.from_function(
 )
 
 # Fill this list with common Mathlib declarations available in your Lake environment
-MATHLIB_NAMES = [
-    "Nat.add_comm", "Nat.mul_comm", "List.map_nil", "Monoid.mul_one",
+#MATHLIB_NAMES = [
+ #   "Nat.add_comm", "Nat.mul_comm", "List.map_nil", "Monoid.mul_one",
     # ... populate as needed or load dynamically via lean server
-]
+#]
+
+def load_mathlib_names() -> List[str]:
+    cmd = "#list"
+    messages = lean_server.run(Command(cmd=cmd)).messages
+    names = []
+    for msg in messages:
+        if hasattr(msg, "message"):
+            parts = msg.message.strip().split("\n")
+            names.extend([p.strip() for p in parts if p.strip()])
+    return names
+
+
+MATHLIB_NAMES = load_mathlib_names()
+
+
 
 def _find_related_mathlib(
     term: str,
@@ -262,7 +332,7 @@ def _find_related_mathlib(
     then fetch their definitions.
     """
     matches = get_close_matches(term, MATHLIB_NAMES, n=k, cutoff=0.5)
-    print(f"[debug] matches for {term!r} → {matches}", flush=True)
+    print(f"[knn] Closest Mathlib matches to '{term}': {matches}")
 
     results: List[Tuple[str, str]] = []
     for name in matches:
