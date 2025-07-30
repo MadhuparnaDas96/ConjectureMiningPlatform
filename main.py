@@ -163,23 +163,3 @@ if __name__ == "__main__":
         print("Structured Response:", structured)
     except Exception:
         pass
-
-
-
-
-#query = input("what can I help you with?")
-#raw_response = agent_executor.invoke({"query": query})
-#print(raw_response)
-
-#try:
- #   structured_response = parser.parse(raw_response.get("output")[0]["text"])
-  #  print("Structured Response:", structured_response)
-#except Exception as e:
- #   print("Error parsing response:", e, "Raw Response:", raw_response)
-
-
-
-
-#if __name__ == "__main__":
- #   print(find_related_mathlib("Nat.add_comm"))
-
